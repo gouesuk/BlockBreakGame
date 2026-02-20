@@ -121,7 +121,7 @@ Public Class Form1
 
     ''' <summary>
     ''' 타이머 틱 - 매 프레임 실행
-    ''' 패들 이동 → 게임 상태 업데이트 → 화면 갱신
+    ''' 패들 이동 → 게임 상태 업데이트 → 효과음 처리 → 화면 갱신
     ''' </summary>
     Private Sub gameTimer_Tick(sender As Object, e As EventArgs)
         ' 키보드 패들 이동 (키가 눌린 동안 계속 이동)
@@ -131,6 +131,29 @@ Public Class Form1
         ' 게임 로직 업데이트
         _logic.Update()
 
+        ' 효과음 처리: GameLogic의 플래그를 읽어 백그라운드에서 재생
+        ' 우선순위: GameOver > Clear > LifeLost > BrickHit > PaddleHit > WallHit
+        ' (같은 프레임에 복수 이벤트 발생 시 가장 중요한 것만 재생)
+        If _logic.SoundGameOver Then
+            ' 게임 오버: 낮고 길게 떨어지는 소리 (3음)
+            PlayBeepAsync(300, 200)
+        ElseIf _logic.SoundClear Then
+            ' 스테이지 클리어: 밝고 높은 상승 팡파레 (3음 연속)
+            PlayBeepAsync(600, 100, 800, 100, 1000, 200)
+        ElseIf _logic.SoundLifeLost Then
+            ' 목숨 잃음: 중간 톤 하강 2음
+            PlayBeepAsync(400, 150, 250, 200)
+        ElseIf _logic.SoundBrickHit Then
+            ' 벽돌 파괴: 짧고 높은 타격음
+            PlayBeepAsync(880, 60)
+        ElseIf _logic.SoundPaddleHit Then
+            ' 패들 충돌: 중간 톤 짧은 타격음
+            PlayBeepAsync(440, 50)
+        ElseIf _logic.SoundWallHit Then
+            ' 벽 충돌: 낮고 짧은 효과음
+            PlayBeepAsync(220, 40)
+        End If
+
         ' 화면 갱신 요청 (→ picGame_Paint 호출)
         picGame.Invalidate()
 
@@ -138,6 +161,40 @@ Public Class Form1
         If _logic.State = GameState.GameOver OrElse _logic.State = GameState.Clear Then
             gameTimer.Stop()
         End If
+    End Sub
+
+    ''' <summary>
+    ''' 효과음을 백그라운드 스레드에서 재생하는 헬퍼 메서드
+    ''' Console.Beep은 동기(블로킹) 호출이므로 ThreadPool을 사용해 UI 응답성을 유지
+    ''' ParamArray로 (주파수1, 지속시간1, 주파수2, 지속시간2, ...) 형태로 전달
+    ''' </summary>
+    ''' <param name="freqDurationPairs">주파수(Hz)와 지속시간(ms) 쌍의 배열</param>
+    Private Sub PlayBeepAsync(ParamArray freqDurationPairs() As Integer)
+        ' 배열이 홀수 개이거나 비어있으면 무시
+        If freqDurationPairs Is Nothing OrElse freqDurationPairs.Length Mod 2 <> 0 Then Return
+
+        ' 배열을 복사하여 람다에 캡처 (클로저 안전성 확보)
+        Dim pairs() As Integer = CType(freqDurationPairs.Clone(), Integer())
+
+        ' ThreadPool로 비동기 재생 (게임 루프 블로킹 방지)
+        Threading.ThreadPool.QueueUserWorkItem(
+            Sub(state)
+                Try
+                    ' 쌍 단위로 순서대로 Beep 재생
+                    Dim i As Integer = 0
+                    Do While i < pairs.Length - 1
+                        Dim freq As Integer = pairs(i)       ' 주파수 (Hz)
+                        Dim dur As Integer = pairs(i + 1)    ' 지속시간 (ms)
+                        ' 유효 범위 검사 (Console.Beep 허용 범위: 37~32767 Hz)
+                        If freq >= 37 AndAlso freq <= 32767 AndAlso dur > 0 Then
+                            Console.Beep(freq, dur)
+                        End If
+                        i += 2
+                    Loop
+                Catch ex As Exception
+                    ' 효과음 실패는 게임 진행에 영향 없으므로 조용히 무시
+                End Try
+            End Sub)
     End Sub
 
     ' ═══════════════════════════════════════════════════════════

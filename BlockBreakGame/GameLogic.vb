@@ -83,6 +83,16 @@ Public Class GameLogic
     Public State As GameState
     Public BricksRemaining As Integer
 
+    ' ── 효과음 이벤트 플래그 ─────────────────────────────────────
+    ' Form1에서 매 프레임 확인하여 효과음 재생에 사용
+    ' Update() 시작 시 모두 False로 초기화됨
+    Public SoundBrickHit As Boolean   ' 벽돌 파괴 시
+    Public SoundPaddleHit As Boolean  ' 패들에 공이 맞을 때
+    Public SoundWallHit As Boolean    ' 벽(좌/우/상단)에 공이 맞을 때
+    Public SoundLifeLost As Boolean   ' 목숨을 잃을 때
+    Public SoundGameOver As Boolean   ' 게임 오버 시
+    Public SoundClear As Boolean      ' 스테이지 클리어 시
+
     ' 난수 생성기 (공 발사 각도 랜덤화)
     Private _rng As New Random()
 
@@ -199,6 +209,14 @@ Public Class GameLogic
     Public Sub Update()
         If State <> GameState.Playing Then Return
 
+        ' 효과음 플래그 초기화 (매 프레임 시작 시 전부 리셋)
+        SoundBrickHit = False
+        SoundPaddleHit = False
+        SoundWallHit = False
+        SoundLifeLost = False
+        SoundGameOver = False
+        SoundClear = False
+
         ' 1. 공 이동
         BallX += BallVX
         BallY += BallVY
@@ -207,15 +225,18 @@ Public Class GameLogic
         If BallX <= 0 Then
             BallX = 0
             BallVX = Math.Abs(BallVX)
+            SoundWallHit = True   ' 왼쪽 벽 충돌 효과음 플래그
         ElseIf BallX + BALL_SIZE >= GAME_WIDTH Then
             BallX = GAME_WIDTH - BALL_SIZE
             BallVX = -Math.Abs(BallVX)
+            SoundWallHit = True   ' 오른쪽 벽 충돌 효과음 플래그
         End If
 
         ' 3. 상단 벽 충돌
         If BallY <= 0 Then
             BallY = 0
             BallVY = Math.Abs(BallVY)
+            SoundWallHit = True   ' 상단 벽 충돌 효과음 플래그
         End If
 
         ' 4. 하단 이탈 → 목숨 감소
@@ -256,6 +277,9 @@ Public Class GameLogic
 
         ' 공이 패들 안에 박히지 않도록 위치 보정
         BallY = PaddleY - BALL_SIZE
+
+        ' 패들 충돌 효과음 플래그 설정
+        SoundPaddleHit = True
     End Sub
 
     ''' <summary>벽돌과의 충돌 처리 - 겹침 방향으로 반사, 프레임당 1개</summary>
@@ -274,6 +298,7 @@ Public Class GameLogic
                 brick.IsAlive = False
                 Score += SCORE_PER_BRICK
                 BricksRemaining -= 1
+                SoundBrickHit = True   ' 벽돌 파괴 효과음 플래그 설정
 
                 ' 충돌 방향 판단: 4방향 겹침 중 최솟값 방향으로 반사
                 Dim overlapLeft = (BallX + BALL_SIZE) - brickRect.Left
@@ -293,6 +318,7 @@ Public Class GameLogic
                 ' 스테이지 클리어 확인
                 If BricksRemaining = 0 Then
                     State = GameState.Clear
+                    SoundClear = True   ' 스테이지 클리어 효과음 플래그 설정
                 End If
 
                 Return  ' 프레임당 하나의 벽돌만 처리 (터널링 방지)
@@ -305,10 +331,12 @@ Public Class GameLogic
         Lives -= 1
         If Lives <= 0 Then
             State = GameState.GameOver
+            SoundGameOver = True   ' 게임 오버 효과음 플래그 설정
         Else
             ' 공을 패들 위로 복귀 후 대기 상태
             ResetBall()
             State = GameState.Waiting
+            SoundLifeLost = True   ' 목숨 잃음 효과음 플래그 설정
         End If
     End Sub
 
