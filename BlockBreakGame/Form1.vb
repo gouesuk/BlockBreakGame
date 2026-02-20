@@ -8,6 +8,7 @@ Imports System.Drawing
 Imports System.Windows.Forms
 Imports System.Media
 Imports System.IO
+Imports System.Text
 
 ''' <summary>
 ''' 메인 폼 - UI 이벤트 처리 및 게임 모듈 연결
@@ -158,7 +159,7 @@ Public Class Form1
         ' ── WAV 헤더(44바이트) + PCM 데이터 버퍼 ──────────────────
         Dim dataSize As Integer = totalSamples * 2   ' 16비트 = 2바이트/샘플
         Dim wav(43 + dataSize) As Byte
-        Dim enc As Text.Encoding = Text.Encoding.ASCII
+        Dim enc As Encoding = Encoding.ASCII
 
         ' RIFF 청크
         Array.Copy(enc.GetBytes("RIFF"), 0, wav, 0, 4)
