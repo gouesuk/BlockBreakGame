@@ -6,6 +6,8 @@
 
 Imports System.Drawing
 Imports System.Windows.Forms
+Imports System.Media
+Imports System.IO
 
 ''' <summary>
 ''' 메인 폼 - UI 이벤트 처리 및 게임 모듈 연결
@@ -28,9 +30,13 @@ Public Class Form1
     Private _keyLeft As Boolean = False   ' Left 키 누름 여부
     Private _keyRight As Boolean = False  ' Right 키 누름 여부
 
-    ' ── 효과음 동시 재생 방지 플래그 ───────────────────────────────
-    ' 0 = 유휴, 1 = 재생 중 (Threading.Interlocked로 원자적 접근)
-    Private _beepBusy As Integer = 0
+    ' ── 효과음 SoundPlayer (PCM WAV 사인파, 시작 시 미리 로드) ───────
+    Private _sfxWall As SoundPlayer       ' 벽 충돌음
+    Private _sfxPaddle As SoundPlayer     ' 패들 충돌음
+    Private _sfxBrick As SoundPlayer      ' 벽돌 파괴음
+    Private _sfxLifeLost As SoundPlayer   ' 목숨 잃음
+    Private _sfxGameOver As SoundPlayer   ' 게임 오버
+    Private _sfxClear As SoundPlayer      ' 스테이지 클리어
 
     ' ═══════════════════════════════════════════════════════════
     ' 초기화
@@ -117,7 +123,88 @@ Public Class Form1
         gameTimer = New Timer()
         gameTimer.Interval = 16    ' 약 60 FPS
         AddHandler gameTimer.Tick, AddressOf gameTimer_Tick
+
+        ' 효과음 미리 로드 (첫 재생 지연 방지)
+        InitSounds()
     End Sub
+
+    ''' <summary>효과음 SoundPlayer 초기화 (PCM WAV 사인파 생성 후 미리 로드)</summary>
+    Private Sub InitSounds()
+        ' 단음 효과음
+        _sfxWall   = CreateTonePlayer(330, 40)    ' 벽 충돌: 낮고 짧게
+        _sfxPaddle = CreateTonePlayer(523, 70)    ' 패들 충돌: 중간 톤
+        _sfxBrick  = CreateTonePlayer(880, 55)    ' 벽돌 파괴: 높고 선명
+        ' 다음(多音) 효과음 (주파수1,지속시간1, 주파수2,지속시간2, ...)
+        _sfxLifeLost  = CreateTonePlayer(600, 70, 300, 100)              ' 목숨 잃음: 하강 2음 (170ms)
+        _sfxGameOver  = CreateTonePlayer(400, 130, 300, 130, 200, 180)   ' 게임오버: 하강 3음
+        _sfxClear     = CreateTonePlayer(600, 90, 800, 90, 1050, 180)    ' 클리어: 상승 3음
+    End Sub
+
+    ''' <summary>
+    ''' 주파수/지속시간 쌍 목록으로 PCM WAV를 생성하고 SoundPlayer를 반환
+    ''' ParamArray로 (주파수1, ms1, 주파수2, ms2, ...) 형태로 전달
+    ''' </summary>
+    Private Function CreateTonePlayer(ParamArray freqDurPairs() As Integer) As SoundPlayer
+        Const SAMPLE_RATE As Integer = 22050   ' 22kHz 모노 16비트
+
+        ' ── 총 샘플 수 계산 ────────────────────────────────────────
+        Dim totalSamples As Integer = 0
+        Dim i As Integer = 0
+        Do While i < freqDurPairs.Length - 1
+            totalSamples += CInt(SAMPLE_RATE * freqDurPairs(i + 1) / 1000.0)
+            i += 2
+        Loop
+
+        ' ── WAV 헤더(44바이트) + PCM 데이터 버퍼 ──────────────────
+        Dim dataSize As Integer = totalSamples * 2   ' 16비트 = 2바이트/샘플
+        Dim wav(43 + dataSize) As Byte
+        Dim enc As Text.Encoding = Text.Encoding.ASCII
+
+        ' RIFF 청크
+        Array.Copy(enc.GetBytes("RIFF"), 0, wav, 0, 4)
+        Array.Copy(BitConverter.GetBytes(36 + dataSize), 0, wav, 4, 4)
+        Array.Copy(enc.GetBytes("WAVE"), 0, wav, 8, 4)
+        ' fmt 청크
+        Array.Copy(enc.GetBytes("fmt "), 0, wav, 12, 4)
+        Array.Copy(BitConverter.GetBytes(16), 0, wav, 16, 4)                ' fmt 크기
+        Array.Copy(BitConverter.GetBytes(CShort(1)), 0, wav, 20, 2)        ' PCM
+        Array.Copy(BitConverter.GetBytes(CShort(1)), 0, wav, 22, 2)        ' 모노
+        Array.Copy(BitConverter.GetBytes(SAMPLE_RATE), 0, wav, 24, 4)      ' 샘플레이트
+        Array.Copy(BitConverter.GetBytes(SAMPLE_RATE * 2), 0, wav, 28, 4)  ' 바이트레이트
+        Array.Copy(BitConverter.GetBytes(CShort(2)), 0, wav, 32, 2)        ' 블록정렬
+        Array.Copy(BitConverter.GetBytes(CShort(16)), 0, wav, 34, 2)       ' 비트심도
+        ' data 청크
+        Array.Copy(enc.GetBytes("data"), 0, wav, 36, 4)
+        Array.Copy(BitConverter.GetBytes(dataSize), 0, wav, 40, 4)
+
+        ' ── 사인파 샘플 채우기 ──────────────────────────────────────
+        Dim sampleIdx As Integer = 0
+        i = 0
+        Do While i < freqDurPairs.Length - 1
+            Dim freq As Integer = freqDurPairs(i)
+            Dim durMs As Integer = freqDurPairs(i + 1)
+            Dim noteSamples As Integer = CInt(SAMPLE_RATE * durMs / 1000.0)
+
+            For s As Integer = 0 To noteSamples - 1
+                Dim t As Double = s / CDbl(SAMPLE_RATE)
+                ' 마지막 20% 구간에서 선형 페이드아웃 (클릭 방지)
+                Dim env As Double = If(s > noteSamples * 0.8,
+                                       (noteSamples - s) / CDbl(noteSamples * 0.2),
+                                       1.0)
+                Dim sample As Short = CShort(0.65 * Short.MaxValue * env *
+                                             Math.Sin(2 * Math.PI * freq * t))
+                Array.Copy(BitConverter.GetBytes(sample), 0, wav, 44 + sampleIdx * 2, 2)
+                sampleIdx += 1
+            Next
+            i += 2
+        Loop
+
+        ' ── MemoryStream → SoundPlayer 생성 및 미리 로드 ──────────
+        Dim ms As New MemoryStream(wav)
+        Dim player As New SoundPlayer(ms)
+        player.Load()   ' 미리 디코딩 (첫 재생 지연 방지)
+        Return player
+    End Function
 
     ' ═══════════════════════════════════════════════════════════
     ' 게임 루프
@@ -135,27 +222,21 @@ Public Class Form1
         ' 게임 로직 업데이트
         _logic.Update()
 
-        ' 효과음 처리: GameLogic의 플래그를 읽어 백그라운드에서 재생
+        ' 효과음 처리: 우선순위 순서대로 재생 (Play()는 논블로킹, 이전 소리 자동 중단)
         ' 우선순위: GameOver > Clear > LifeLost > BrickHit > PaddleHit > WallHit
         ' (같은 프레임에 복수 이벤트 발생 시 가장 중요한 것만 재생)
         If _logic.SoundGameOver Then
-            ' 게임 오버: 낮고 무거운 3음 하강
-            PlayBeepAsync(400, 150, 300, 150, 200, 250)
+            _sfxGameOver.Play()
         ElseIf _logic.SoundClear Then
-            ' 스테이지 클리어: 밝고 상승하는 팡파레
-            PlayBeepAsync(600, 100, 800, 100, 1000, 200)
+            _sfxClear.Play()
         ElseIf _logic.SoundLifeLost Then
-            ' 목숨 잃음: 3음 하강 (더 극적으로) 523Hz→392Hz→261Hz
-            PlayBeepAsync(523, 120, 392, 120, 261, 250)
+            _sfxLifeLost.Play()
         ElseIf _logic.SoundBrickHit Then
-            ' 벽돌 파괴: 높고 선명한 타격음 (80ms로 연장해 가청성 확보)
-            PlayBeepAsync(880, 80)
+            _sfxBrick.Play()
         ElseIf _logic.SoundPaddleHit Then
-            ' 패들 충돌: 중간 톤 타격음 (70ms)
-            PlayBeepAsync(523, 70)
+            _sfxPaddle.Play()
         ElseIf _logic.SoundWallHit Then
-            ' 벽 충돌: 낮고 짧은 효과음 (60ms)
-            PlayBeepAsync(330, 60)
+            _sfxWall.Play()
         End If
 
         ' 화면 갱신 요청 (→ picGame_Paint 호출)
@@ -165,41 +246,6 @@ Public Class Form1
         If _logic.State = GameState.GameOver OrElse _logic.State = GameState.Clear Then
             gameTimer.Stop()
         End If
-    End Sub
-
-    ''' <summary>
-    ''' 효과음을 백그라운드 스레드에서 재생하는 헬퍼 메서드
-    ''' Interlocked로 동시 재생을 방지하여 Console.Beep 장치 충돌 해결
-    ''' ParamArray로 (주파수1, 지속시간1, 주파수2, 지속시간2, ...) 형태로 전달
-    ''' </summary>
-    Private Sub PlayBeepAsync(ParamArray freqDurationPairs() As Integer)
-        If freqDurationPairs Is Nothing OrElse freqDurationPairs.Length Mod 2 <> 0 Then Return
-
-        ' 이미 재생 중이면 건너뜀 (장치 독점 충돌 방지)
-        ' CompareExchange: _beepBusy가 0이면 1로 바꾸고 0 반환, 아니면 현재값 반환
-        If Threading.Interlocked.CompareExchange(_beepBusy, 1, 0) <> 0 Then Return
-
-        Dim pairs() As Integer = CType(freqDurationPairs.Clone(), Integer())
-
-        Threading.ThreadPool.QueueUserWorkItem(
-            Sub(state)
-                Try
-                    Dim i As Integer = 0
-                    Do While i < pairs.Length - 1
-                        Dim freq As Integer = pairs(i)
-                        Dim dur As Integer = pairs(i + 1)
-                        If freq >= 37 AndAlso freq <= 32767 AndAlso dur > 0 Then
-                            Console.Beep(freq, dur)
-                        End If
-                        i += 2
-                    Loop
-                Catch ex As Exception
-                    ' 효과음 실패는 게임 진행에 영향 없으므로 조용히 무시
-                Finally
-                    ' 재생 완료(또는 실패) 후 반드시 플래그 해제
-                    Threading.Interlocked.Exchange(_beepBusy, 0)
-                End Try
-            End Sub)
     End Sub
 
     ' ═══════════════════════════════════════════════════════════
