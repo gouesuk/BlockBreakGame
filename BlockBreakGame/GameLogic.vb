@@ -207,15 +207,17 @@ Public Class GameLogic
     ''' Playing 상태일 때만 실행
     ''' </summary>
     Public Sub Update()
-        If State <> GameState.Playing Then Return
-
-        ' 효과음 플래그 초기화 (매 프레임 시작 시 전부 리셋)
+        ' 효과음 플래그 초기화 (상태와 무관하게 매 프레임 리셋)
+        ' ※ State 체크보다 앞에 위치해야 Waiting/GameOver 상태에서도
+        '   전 프레임에 설정된 플래그가 다음 프레임에 중복 재생되지 않음
         SoundBrickHit = False
         SoundPaddleHit = False
         SoundWallHit = False
         SoundLifeLost = False
         SoundGameOver = False
         SoundClear = False
+
+        If State <> GameState.Playing Then Return
 
         ' 1. 공 이동
         BallX += BallVX
