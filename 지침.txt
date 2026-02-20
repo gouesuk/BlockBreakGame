@@ -1,0 +1,34 @@
+VB.NET Windows Forms로 벽돌깨기(Breakout) 게임을 만들어줘.
+
+[환경]
+- Visual Studio 2022
+- .NET Framework 4.8
+- Windows Forms 단일 Form 사용
+
+[구성 요소]
+- 게임 화면: PictureBox 또는 Form에 직접 GDI+ 렌더링
+- 패들: 마우스 또는 좌우 방향키로 조작
+- 공: Timer로 이동, 벽/패들/벽돌 충돌 처리
+- 벽돌: 5행 x 10열 배열로 구성
+
+[기능]
+- 점수 표시 (벽돌 1개 = 10점)
+- 목숨 3개
+- 게임 시작 / 재시작 버튼
+- 모든 벽돌 제거 시 클리어 메시지
+
+[코드 스타일]
+- 주석 포함
+- 기능별로 Sub/Function 분리
+- 하나의 Form1.vb 파일에 모두 작성
+
+
+다음 순서로 벽돌깨기 게임을 개발해줘.
+
+1. 먼저 설계 Agent로서 전체 클래스 구조를 설계하고 design.md를 작성해
+2. 렌더링 Agent로서 Renderer.vb를 구현해 (GDI+ 사용)
+3. 게임로직 Agent로서 GameLogic.vb를 구현해
+4. UI Agent로서 Form1.vb를 구현하고 위 모듈들을 연결해
+5. 마지막으로 전체 코드 리뷰 후 수정이 필요한 부분을 수정해
+
+각 단계 완료 후 다음 단계로 넘어가기 전에 결과를 보고해줘.

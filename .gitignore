@@ -1,0 +1,19 @@
+# Visual Studio / VB.NET
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+
+# Build output
+bin/
+obj/
+
+# NuGet
+packages/
+*.nupkg
+
+# Temporary files
+*.tmp
+*.temp
+*.cache
