@@ -28,6 +28,10 @@ Public Class Form1
     Private _keyLeft As Boolean = False   ' Left 키 누름 여부
     Private _keyRight As Boolean = False  ' Right 키 누름 여부
 
+    ' ── 효과음 동시 재생 방지 플래그 ───────────────────────────────
+    ' 0 = 유휴, 1 = 재생 중 (Threading.Interlocked로 원자적 접근)
+    Private _beepBusy As Integer = 0
+
     ' ═══════════════════════════════════════════════════════════
     ' 초기화
     ' ═══════════════════════════════════════════════════════════
@@ -135,23 +139,23 @@ Public Class Form1
         ' 우선순위: GameOver > Clear > LifeLost > BrickHit > PaddleHit > WallHit
         ' (같은 프레임에 복수 이벤트 발생 시 가장 중요한 것만 재생)
         If _logic.SoundGameOver Then
-            ' 게임 오버: 낮고 길게 떨어지는 소리 (3음)
-            PlayBeepAsync(300, 200)
+            ' 게임 오버: 낮고 무거운 3음 하강
+            PlayBeepAsync(400, 150, 300, 150, 200, 250)
         ElseIf _logic.SoundClear Then
-            ' 스테이지 클리어: 밝고 높은 상승 팡파레 (3음 연속)
+            ' 스테이지 클리어: 밝고 상승하는 팡파레
             PlayBeepAsync(600, 100, 800, 100, 1000, 200)
         ElseIf _logic.SoundLifeLost Then
-            ' 목숨 잃음: 중간 톤 하강 2음
-            PlayBeepAsync(400, 150, 250, 200)
+            ' 목숨 잃음: 3음 하강 (더 극적으로) 523Hz→392Hz→261Hz
+            PlayBeepAsync(523, 120, 392, 120, 261, 250)
         ElseIf _logic.SoundBrickHit Then
-            ' 벽돌 파괴: 짧고 높은 타격음
-            PlayBeepAsync(880, 60)
+            ' 벽돌 파괴: 높고 선명한 타격음 (80ms로 연장해 가청성 확보)
+            PlayBeepAsync(880, 80)
         ElseIf _logic.SoundPaddleHit Then
-            ' 패들 충돌: 중간 톤 짧은 타격음
-            PlayBeepAsync(440, 50)
+            ' 패들 충돌: 중간 톤 타격음 (70ms)
+            PlayBeepAsync(523, 70)
         ElseIf _logic.SoundWallHit Then
-            ' 벽 충돌: 낮고 짧은 효과음
-            PlayBeepAsync(220, 40)
+            ' 벽 충돌: 낮고 짧은 효과음 (60ms)
+            PlayBeepAsync(330, 60)
         End If
 
         ' 화면 갱신 요청 (→ picGame_Paint 호출)
@@ -165,27 +169,25 @@ Public Class Form1
 
     ''' <summary>
     ''' 효과음을 백그라운드 스레드에서 재생하는 헬퍼 메서드
-    ''' Console.Beep은 동기(블로킹) 호출이므로 ThreadPool을 사용해 UI 응답성을 유지
+    ''' Interlocked로 동시 재생을 방지하여 Console.Beep 장치 충돌 해결
     ''' ParamArray로 (주파수1, 지속시간1, 주파수2, 지속시간2, ...) 형태로 전달
     ''' </summary>
-    ''' <param name="freqDurationPairs">주파수(Hz)와 지속시간(ms) 쌍의 배열</param>
     Private Sub PlayBeepAsync(ParamArray freqDurationPairs() As Integer)
-        ' 배열이 홀수 개이거나 비어있으면 무시
         If freqDurationPairs Is Nothing OrElse freqDurationPairs.Length Mod 2 <> 0 Then Return
 
-        ' 배열을 복사하여 람다에 캡처 (클로저 안전성 확보)
+        ' 이미 재생 중이면 건너뜀 (장치 독점 충돌 방지)
+        ' CompareExchange: _beepBusy가 0이면 1로 바꾸고 0 반환, 아니면 현재값 반환
+        If Threading.Interlocked.CompareExchange(_beepBusy, 1, 0) <> 0 Then Return
+
         Dim pairs() As Integer = CType(freqDurationPairs.Clone(), Integer())
 
-        ' ThreadPool로 비동기 재생 (게임 루프 블로킹 방지)
         Threading.ThreadPool.QueueUserWorkItem(
             Sub(state)
                 Try
-                    ' 쌍 단위로 순서대로 Beep 재생
                     Dim i As Integer = 0
                     Do While i < pairs.Length - 1
-                        Dim freq As Integer = pairs(i)       ' 주파수 (Hz)
-                        Dim dur As Integer = pairs(i + 1)    ' 지속시간 (ms)
-                        ' 유효 범위 검사 (Console.Beep 허용 범위: 37~32767 Hz)
+                        Dim freq As Integer = pairs(i)
+                        Dim dur As Integer = pairs(i + 1)
                         If freq >= 37 AndAlso freq <= 32767 AndAlso dur > 0 Then
                             Console.Beep(freq, dur)
                         End If
@@ -193,6 +195,9 @@ Public Class Form1
                     Loop
                 Catch ex As Exception
                     ' 효과음 실패는 게임 진행에 영향 없으므로 조용히 무시
+                Finally
+                    ' 재생 완료(또는 실패) 후 반드시 플래그 해제
+                    Threading.Interlocked.Exchange(_beepBusy, 0)
                 End Try
             End Sub)
     End Sub
